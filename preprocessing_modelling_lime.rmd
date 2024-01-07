@@ -1,0 +1,299 @@
+---
+title: "Preprocessing&Modelling"
+author: "Manasi Gurunath Khandekar"
+date: "2022-12-21"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+```{r }
+library(ggplot2)
+library(scutr)
+library(smotefamily)
+library(caret)
+library(ggstatsplot)
+library(tree)
+library(randomForest)
+library(xgboost)
+library(lime)
+library(skimr)
+library(dplyr)
+```
+## Load Data into R 
+```{r}
+hcv_url = "https://archive.ics.uci.edu/ml/machine-learning-databases/00571/hcvdat0.csv"
+
+hcv_data <- read.csv(url(hcv_url))
+
+hcv_data <- subset(hcv_data, select = -c(X))
+
+head(hcv_data)
+```
+
+## Target Distribution
+```{r}
+barplot(table(hcv_data$Category), main="HCV Prediction", xlab="Distribution of Categories")
+```
+# Missing Values
+```{r}
+rowSums(is.na(hcv_data))
+
+colSums(is.na(hcv_data)) 
+
+barplot(colSums((is.na(hcv_data))))
+
+#Remove Missing Values 
+hcv_data$ALB[is.na(hcv_data$ALB)]<- median(hcv_data$ALB,na.rm = TRUE)
+hcv_data$ALP[is.na(hcv_data$ALP)]<- median(hcv_data$ALP,na.rm = TRUE)
+hcv_data$ALT[is.na(hcv_data$ALT)]<- median(hcv_data$ALT,na.rm = TRUE)
+hcv_data$CHOL[is.na(hcv_data$CHOL)]<- median(hcv_data$CHOL,na.rm = TRUE)
+hcv_data$PROT[is.na(hcv_data$PROT)]<- median(hcv_data$PROT,na.rm = TRUE)
+sapply(hcv_data, function(x) sum(is.na(x)))
+
+```
+Encoding categorical variables to numeric
+```{r}
+barplot(colSums((is.na(hcv_data))))
+
+predictor_variables <- hcv_data[,-which(names(hcv_data) == "Category")] # Select everything except response
+response_variable <- hcv_data$Category   # Only select response variable
+
+levels(response_variable) <- c('0', '1', '2', '3', '4')
+encode_ordinal <- function(x, order = unique(x)) {
+  x <- as.numeric(factor(x, levels = order, exclude = NULL))-1
+  x
+}
+
+table(hcv_data[["Category"]], encode_ordinal(hcv_data[["Category"]]), useNA = "ifany")
+
+hcv_data[["Category"]] <- encode_ordinal(hcv_data[["Category"]])
+hcv_data[["Sex"]] <- encode_ordinal(hcv_data[["Sex"]])
+hcv_data
+print(unique(hcv_data$Category))
+hcv_data$Category_encoded
+
+skim(hcv_data)
+```
+
+## Outlier Detection 
+```{r}
+boxplot(hcv_data, main="Outlier Box Plot", xlab="Features", ylab="Distribution")$out
+
+### Create Copy of the dataframe
+outlier_removed_df <- cbind(hcv_data)
+print(outlier_removed_df)
+
+## Outlier Handling
+for(i in 1:ncol(outlier_removed_df)) {       # for-loop over columns
+  Q <- quantile(outlier_removed_df[ , i], probs=c(.25, .75), na.rm = FALSE)
+  iqr <- IQR(outlier_removed_df[ , i])
+  up <-  Q[2]+1.5*iqr # Upper Range  
+  low<- Q[1]-1.5*iqr # Lower Range﻿
+  outlier_removed_df <- subset(outlier_removed_df, outlier_removed_df[ , i] > (Q[1] - 1.5*iqr) & outlier_removed_df[ , i] < (Q[2]+1.5*iqr))
+}
+
+
+
+```
+#Normalizing the data using min-max scaling 
+```{r}
+min_max_norm <- function(x) {
+  (x - min(x)) / (max(x) - min(x))
+}
+
+data_norm <- as.data.frame(lapply(hcv_data[2:13], min_max_norm))
+
+data_norm$Category <- hcv_data$Category
+
+#view first six rows of normalized dataset
+head(data_norm)
+
+```
+
+## Train test split
+```{r}
+set.seed(1)
+sample <- sample(c(TRUE, FALSE), nrow(data_norm), replace=TRUE, prob=c(0.7,0.3))
+train  <- data_norm[sample, ]
+test   <- data_norm[!sample, ]
+
+#Plot of training data
+ggplot(data = train, aes(fill = Category)) +
+  geom_bar(aes(x = Category))+
+  ggtitle("Number of samples in each class", subtitle = "Training dataset")+
+  xlab("")+
+  ylab("Samples")+
+  scale_y_continuous(expand = c(0,0))+
+  scale_x_discrete(expand = c(0,0))+
+  theme(legend.position = "none", 
+        legend.title = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+  )
+
+#Plot of test data
+ggplot(data = test, aes(fill = Category)) +
+  geom_bar(aes(x = Category))+
+  ggtitle("Number of samples in each class", subtitle = "Test dataset")+
+  xlab("")+
+  ylab("Samples")+
+  scale_y_continuous(expand = c(0,0))+
+  scale_x_discrete(expand = c(0,0))+
+  theme(legend.position = "none", 
+        legend.title = element_blank(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+  )
+```
+
+## Modelling 
+## Decision Tree
+```{r}
+#simple tree model with its summary
+model.tree <- tree(as.factor(Category)~., data=train)
+summary(model.tree)
+
+model.tree
+
+#plot the tree
+plot(model.tree)
+text(model.tree)
+
+model.pred = predict(model.tree, test, type = "class")
+table(test$Category, model.pred)
+
+#prune the tree to reduce overfitting
+cv.model <- cv.tree(model.tree, FUN = prune.tree)
+cv.model
+
+#plot pruned tree and its summary
+plot(cv.model$size, cv.model$dev, type = 'b', xlab = "Tree size", ylab = "Cross Validated Classification Error")
+
+tree.pruned = prune.tree(model.tree, best = 5)
+tree.pruned
+
+summary(tree.pruned)
+
+#comparison of pruned and unpruned tree
+pred.unpruned <- predict(model.tree, test, type = "class")
+misclass.unpruned <- sum(test$Category != pred.unpruned)/length(pred.unpruned)
+misclass.unpruned
+
+pred.pruned <- predict(tree.pruned, test, type = "class")
+misclass.pruned <- sum(test$Category != pred.pruned)/length(pred.pruned)
+misclass.pruned
+
+#Confusion Matrix of the model
+truth_num_fac <- factor(test$Category)
+levels(truth_num_fac)
+levels(truth_num_fac) <- levels(pred.pruned)
+head(truth_num_fac)
+confusionMatrix(pred.pruned, truth_num_fac)
+
+```
+############################################################
+## Random Forest
+```{r}
+#Parameters to the model
+train_ctrl <- trainControl(method="cv", # type of resampling in this case Cross-Validated
+                           number=3, # number of folds
+                           search = "random", # we are performing a "random
+)
+
+#Random forest model train
+train %>% select(Category, ALB:PROT) # Remove "Age" and "Sex"
+model_rf <- train(as.factor(Category) ~.,
+                  data = train,
+                  method = "rf", # this will use the randomForest::randomForest function
+                  metric = "Accuracy", # which metric should be optimized for 
+                  trControl = train_ctrl,
+                  # options to be passed to randomForest
+                  ntree = 50,
+                  keep.forest=TRUE,
+                  importance=TRUE) 
+
+#Summary of the model
+model_rf
+
+#Variable importance plot
+randomForest::varImpPlot(model_rf$finalModel)
+
+#Predictions using the trained model 
+probs <- predict(model_rf, test, 'prob') #predicting probability
+class <- predict(model_rf, test, 'raw') #predc=icting the class
+
+truth_num_fac <- factor(test$Category) #convert Category to factor
+levels(truth_num_fac)
+levels(truth_num_fac) <- levels(class) #match levels of original data and predictions
+head(truth_num_fac)
+confusionMatrix(class, truth_num_fac, mode = "everything")
+
+```
+##################################################
+##LIME
+```{r}
+train %>% select(Category, ALB:PROT)
+hcv_data %>% select(Category, ALB:PROT)
+explainer_rf <- lime(train, model = model_rf)
+class(explainer_rf)
+summary(explainer_rf)
+
+explanationrf <- explain(hcv_data[1:2,],
+                         explainer = explainer_rf, 
+                         n_labels = 1,
+                         n_features = 11)
+plot_features(explanationrf)
+```
+
+####################################################
+## XGBoost
+```{r}
+#Convert the data into matrix
+train.data = as.matrix(train[1:12])
+train.label = as.matrix(train$Category)
+test.data = as.matrix(test[1:12])
+test.label = as.matrix(test$Category)
+print(unique(train.label))
+
+xgb.train = xgb.DMatrix(data=train.data,label=train.label)
+xgb.test = xgb.DMatrix(data=test.data,label=test.label)
+
+#number of classes
+num_class = length(unique(train.label))
+num_class
+
+#parameters for the model
+params = list(
+  objective="multi:softprob",
+  eval_metric="mlogloss",
+  num_class=num_class
+)
+
+xgb.fit=xgb.train(
+  params=params,
+  data=xgb.train,
+  nrounds=500,
+  early_stopping_rounds=10,
+  watchlist=list(val1=xgb.train,val2=xgb.test),
+  verbose=0
+)
+
+# Review the final model and results
+xgb.fit
+
+xgb.pred = predict(xgb.fit,test.data,reshape=T)
+print(xgb.pred)
+xgb.pred = as.data.frame(xgb.pred)
+colnames(xgb.pred) = levels(factor(hcv_data$Category))
+
+xgb.pred$prediction = apply(xgb.pred,1,function(x) colnames(xgb.pred)[which.max(x)])
+xgb.pred$label <- test.label
+
+#Accuracy of the model
+result = sum(xgb.pred$prediction==xgb.pred$label)/nrow(xgb.pred)
+print(paste("Final Accuracy =",sprintf("%1.2f%%", 100*result)))
+````

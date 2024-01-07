@@ -1,0 +1,216 @@
+---
+title: "R Notebook"
+output:
+  pdf_document: default
+  html_document:
+    code_folding: hide
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code.
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*.
+
+```{r}
+library(tidymodels)
+library(caret)
+library(tidyverse)
+
+```
+
+Loading the Dataset
+
+```{r}
+df <- read.csv("C:/Users/Nupur/Downloads/hcvdat0.csv")
+head(df, 5)
+```
+
+Checking the number of classes in target variable
+
+```{r}
+length(unique(df$Category))
+```
+
+Obtaining count of various classes in target variable
+
+```{r}
+table(df$Category)
+```
+
+Recoding the classes in the target variable
+
+```{r}
+dfnew2<- df %>% mutate(Category=recode(Category, '0=Blood Donor'="Blood Donor", 
+                                       '0s=suspect Blood Donor'="Suspect BD", 
+                                       '1=Hepatitis' = "Hepatitis", '2=Fibrosis' = 
+                                         "Fibrosis", '3=Cirrhosis' = "Cirrhosis"))
+dfnew3<- dfnew2 %>% mutate(Sex=recode(Sex, 'm'='Male', 'f'='Female'))
+head(dfnew3, 5)
+```
+
+Obtaining statistical distribution of all variables in the dataset
+
+```{r}
+library(psych)
+desc <- describe(dfnew3)
+desc
+```
+
+```{r}
+library(knitr)
+library(broom)
+kable(desc, format="markdown", digits =3)
+
+```
+
+### Using ggplot to generate bar chart: Proportion of Gender affected by Different HCV Diseases
+
+```{r}
+sex_n <- dfnew3 %>% group_by(Category, Sex) %>% summarise(N = n())
+
+ggplot(sex_n, aes(Category, N)) +
+  geom_col(aes(fill = Sex), position = "fill") +
+  scale_fill_brewer(palette = "Set2", direction = -1) +
+  xlab("HCV Diseases") +
+  ylab("Proportion")  + labs(title = "Proportion of Gender affected by 
+                             Different HCV Diseases")
+```
+
+### Using ggplot to generate pie chart and donut chart: Percentage Distribution of HCV Diseases
+
+```{r}
+dfnew3.Category = dfnew3 %>% 
+  group_by(Category) %>% 
+  count() %>% 
+  ungroup()%>% 
+  arrange(desc(Category)) %>%
+  mutate(percentage = round(n/sum(n),4)*100,
+         lab.pos = cumsum(percentage)-.5*percentage)
+```
+
+```{r}
+ggplot(data = dfnew3.Category, 
+       aes(x = "", y = percentage, fill = Category))+
+  geom_bar(stat = "identity")+
+  coord_polar("y", start = 200) +
+  geom_text(aes(y = lab.pos, label = paste(percentage,"%", sep = "")), col = "white") +
+  theme_void() +
+  scale_fill_brewer(palette = "Dark2")
+```
+
+```{r}
+library(ggpubr)
+```
+
+```{r}
+ggplot(data = dfnew3.Category, 
+       aes(x = 2, y = percentage, fill = Category))+
+  geom_bar(stat = "identity")+
+  coord_polar("y", start = 200) + ggtitle("Percentage Distribution of HCV Diseases") +
+  geom_text(aes(y = lab.pos, label = paste(percentage,"%", sep = "")), col = "white") +
+  theme_void() + scale_colour_manual(values=c("blue", "brown1" , "yellow",
+                                              "orange", "cyan"))+ xlim(.2,2.5)
+```
+
+```{r}
+library(ggplot2)
+library(ggridges)
+theme_set(theme_ridges())
+```
+
+### Using ggplot to generate ridgeline plot: Percentage Distribution of HCV Diseases Vs Sex
+
+```{r}
+ggplot(dfnew3, aes(x = Sex, y = Category)) +
+  geom_density_ridges(aes(fill = Category)) +
+  scale_fill_manual(values = c("#00AFBB", "#E7B800" , "#FC4E07","#0073C2FF", "#868686FF"))
+```
+
+### Using ggplot to generate ridgeline plot: Percentage Distribution of HCV Diseases Vs Age
+
+```{r}
+ggplot(dfnew3, aes(x = Age, y = Category)) +
+  geom_density_ridges(aes(fill = Category)) +
+  scale_fill_manual(values = c("#00AFBB", "#E7B800" , "#FC4E07","#0073C2FF", "#868686FF"))
+
+```
+
+### Using ggplot to generate violin plot: Distribution of HCV Diseases Vs Sex
+
+```{r}
+dfnew3 %>%
+  ggplot(aes(x = Category,
+             y = Age,
+             fill = Sex))+
+  geom_violin()
+```
+
+Obtaining count of missing values in each variable
+
+```{r}
+sapply(dfnew3, function(x) sum(is.na(x)))
+```
+
+```{r}
+length(new)
+```
+
+```{r}
+library(ggplot2)
+library(GGally)
+library(ggrepel)
+library(stringr)
+library(themis) # for  and other recipes for target balancing
+library(vip) # for variable importance
+library(probably) # for balancing performance
+library(tidymodels)
+```
+
+### Obtaining boxplot displaying outliers for each variable
+
+```{r}
+library("reshape2") 
+data_long <- melt(dfnew3)                                      # Reshaping data frame
+head(data_long) 
+```
+
+```{r}
+
+ggplot(data_long, aes(x = variable, y = value)) +            # Applying ggplot function
+  geom_boxplot() + labs(title = "Boxplots displaying outliers for each variable")
+```
+
+### Using ggplot to generate violin plot: Distribution of HCV Diseases Vs Age
+
+```{r}
+ggplot(dfnew3, aes(x = Sex, y = Category)) +
+  geom_density_ridges(aes(fill = Category)) +
+  scale_fill_manual(values = c("#00AFBB", "#E7B800", "#FC4E07","#0073C2FF", "#868686FF" ))
+ggplot(dfnew3, aes(Category, Age)) +
+  geom_violin(aes(fill = Category), alpha = 0.5) +
+  geom_jitter(alpha = 0.5, size = 0.6) +
+  geom_boxplot(aes(fill = Category), alpha = 0.2) +
+  scale_fill_brewer(palette = "Set1", direction = -1) +
+  xlab("")
+```
+
+```{r}
+library(DataExplorer)
+library(dplyr)
+library(corrplot)
+```
+
+### Obtaining correlation plot
+
+```{r}
+numdf <- select_if(dfnew3, is.numeric)
+head(numdf, 5)
+```
+
+```{r}
+Correlation <- cor(numdf, use="pairwise.complete.obs")
+Correlation
+```
+
+```{r}
+corrplot(Correlation)
+```
